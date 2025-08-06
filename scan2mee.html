@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>📄 PDF / Image / Paste to Word & Excel Converter</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; }
+  h2 { text-align: center; }
+  .container { max-width: 700px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);}
+  input[type=file] { display: block; margin: 10px auto; }
+  button { padding: 10px 15px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; }
+  .btn-copy { background: #4CAF50; color: white; }
+  .btn-save { background: #2196F3; color: white; }
+  .btn-word { background: #8E44AD; color: white; }
+  .btn-excel { background: #27AE60; color: white; }
+  pre { background: #eef; padding: 10px; white-space: pre-wrap; word-wrap: break-word; border-radius: 5px; }
+  #status { font-style: italic; color: #555; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h2>📄 PDF / Image / Paste → Word & Excel Converter</h2>
+    <input type="file" id="fileInput" accept=".pdf,image/*" capture="camera">
+    <p><b>Tip:</b> Anda boleh <b>Paste (Ctrl+V / Cmd+V)</b> terus gambar ke sini.</p>
+    <p id="status">Upload / paste gambar atau PDF untuk mula...</p>
+    <pre id="output"></pre>
+    <button class="btn-copy" onclick="copyText()">Copy Text</button>
+    <button class="btn-save" onclick="saveText()">Save as .txt</button>
+    <button class="btn-word" onclick="saveWord()">Save as Word</button>
+    <button class="btn-excel" onclick="saveExcel()">Save as Excel</button>
+  </div>
+
+<!-- Libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/docx/7.8.2/docx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<script>
+function copyText() {
+  const text = document.getElementById('output').innerText;
+  navigator.clipboard.writeText(text);
+  alert('Teks disalin ke clipboard ✅');
+}
+
+function saveText() {
+  const text = document.getElementById('output').innerText;
+  const blob = new Blob([text], { type: 'text/plain' });
+  saveAs(blob, 'output.txt');
+}
+
+function saveWord() {
+  const text = document.getElementById('output').innerText;
+  const { Document, Packer, Paragraph } = docx;
+  const doc = new Document({
+    sections: [{ properties: {}, children: [new Paragraph(text)] }]
+  });
+  Packer.toBlob(doc).then(blob => saveAs(blob, 'output.docx'));
+}
+
+function saveExcel() {
+  const text = document.getElementById('output').innerText.split("\n");
+  const ws = XLSX.utils.aoa_to_sheet(text.map(line => [line]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "OCR Output");
+  XLSX.writeFile(wb, 'output.xlsx');
+}
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.type === "application/pdf") {
+    processPDF(file);
+  } else {
+    processImage(file);
+  }
+});
+
+// Paste image from clipboard
+document.addEventListener('paste', function (event) {
+  const items = (event.clipboardData || event.originalEvent.clipboardData).items;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf("image") === 0) {
+      const blob = items[i].getAsFile();
+      processImage(blob);
+    }
+  }
+});
+
+function processImage(file) {
+  document.getElementById('status').innerText = "⏳ Memproses imej...";
+  Tesseract.recognize(file, 'eng', { logger: m => console.log(m) })
+    .then(({ data: { text } }) => {
+      document.getElementById('status').innerText = "✅ Siap!";
+      document.getElementById('output').innerText = text.trim();
+    });
+}
+
+function processPDF(file) {
+  document.getElementById('status').innerText = "⏳ Memproses PDF...";
+  const fileReader = new FileReader();
+  fileReader.onload = function() {
+    const typedarray = new Uint8Array(this.result);
+    pdfjsLib.getDocument(typedarray).promise.then(async function(pdf) {
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        const imgData = canvas.toDataURL("image/png");
+
+        await Tesseract.recognize(imgData, 'eng', { logger: m => console.log(m) })
+          .then(({ data: { text } }) => {
+            fullText += text.trim() + "\n";
+          });
+      }
+      document.getElementById('status').innerText = "✅ Siap!";
+      document.getElementById('output').innerText = fullText.trim();
+    });
+  };
+  fileReader.readAsArrayBuffer(file);
+}
+</script>
+</body>
+</html>
